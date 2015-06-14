@@ -27,9 +27,9 @@ class PlannerDoc(object):
         self._xml_root = xml_root
         self._logger = logging.getLogger(__name__)
 
-    def __str__(self):
-        return(le.tostring(self._xml_root, encoding="UTF-8",
-                           xml_declaration=True, pretty_print=True))
+    def __unicode__(self):
+        return le.tostring(self._xml_root, encoding="unicode",
+                           pretty_print=True)
 
     def allocations(self):
         return self._xml_root.xpath("/project/allocations/allocation")
