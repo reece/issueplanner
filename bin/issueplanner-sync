@@ -43,14 +43,14 @@ import logging
 import os
 import re
 import sys
+import time
 
 import lxml.etree as le
 
 from issueplanner.bitbucketclient import BitbucketClient
 from issueplanner.issueplannerdoc import IssuePlannerDoc
-from issueplanner.utils import bb_to_planner_ts, issue_elapsed_work_seconds
+from issueplanner.utils import bb_to_planner_ts, issue_elapsed_work_seconds, completed_statuses, issue_status_symbols, priority_level_map
 
-completed_statuses = ['resolved', 'closed', 'wontfix', 'duplicate']
 
 def get_options(argv):
     cfg = get_config()
@@ -108,7 +108,7 @@ def _get_issues(opts,tracker):
     if not opts.update_cache and os.path.exists(pickle_path):
         with gzip.open(pickle_path,"r") as fh:
             issues = pickle.load(fh)
-        logger.info("read {n} {fqtn} issues from {fn}".format(
+        logger.debug("read {n} {fqtn} issues from {fn}".format(
             n=len(issues), fqtn=fqtn, fn=pickle_path))
     else:
         bb = BitbucketClient(username=opts.bitbucket_username,
@@ -116,13 +116,26 @@ def _get_issues(opts,tracker):
         issues = list(bb.get_all_issues(tracker["owner"], tracker["slug"]))
         with gzip.open(pickle_path,"w") as fh:
             pickle.dump(issues,fh)
-        logger.info("fetched {n} {fqtn} issues; pickled in {fn}".format(
+        logger.debug("fetched {n} {fqtn} issues; pickled in {fn}".format(
             n=len(issues), fqtn=fqtn, fn=pickle_path))
     return issues
 
 
+
+def sort_tasks(nodes, it_to_ii_map, tracker_issues_map):
+    """sort nodes according to issue data"""
+    def _task_sort_key(it):
+        """return sort key for given issue task"""
+        i = tracker_issues_map[it_to_ii_map[it]]
+        return (i["status"] in completed_statuses,
+                priority_level_map[i["priority"]],
+                int(i["local_id"]))
+    nodes.sort(key=_task_sort_key)
+    return nodes
+
+
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.WARN)
+    logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger(__name__)
 
     opts = get_options(sys.argv)
@@ -142,16 +155,14 @@ if __name__ == "__main__":
     all_tasks = pd.tasks()
 
     for prefix in prefixes:
-        logger.info("processing {} issues...".format(prefix))
-
         pt = pt_map[prefix]
         prj_te = pd.get_project_task(pt)
 
         # map issue ids => task node elements
-        task_issue_re = re.compile(r"(?P<task_title>.*)\s*\[(?P<issue_id>{prefix}-\d+)\]\s*$".format(prefix=prefix))
+        task_issue_re = re.compile(r"\[(?P<issue_id>{prefix}-\d+)\]".format(prefix=prefix))
         planner_tasks_map = {
             m.group("issue_id"): t
-            for t,m in ((t, task_issue_re.match(t.get("name"))) for t in all_tasks)
+            for t,m in ((t, task_issue_re.search(t.get("name"))) for t in all_tasks)
             if m is not None
             }
         planner_tasks_ii = set(planner_tasks_map.keys())
@@ -168,8 +179,8 @@ if __name__ == "__main__":
         p_and_t = planner_tasks_ii & tracker_issues_ii  # in both
         p_not_t = planner_tasks_ii - tracker_issues_ii  # in planner, not tracker
 
-        logger.info("{} unique in tracker, {} unique in planner xml, {} common".format(
-            len(t_not_p), len(p_not_t), len(p_and_t)))
+        logger.info("{}: {} unique in tracker, {} unique in planner xml, {} common".format(
+            prefix, len(t_not_p), len(p_not_t), len(p_and_t)))
 
         if len(p_not_t) > 0:
             logger.warning("{} issue ids in planner are non-existant in the {}/{} issue tracker: {}".format(
@@ -186,11 +197,12 @@ if __name__ == "__main__":
             logger.info("added issue {}".format(ii))
 
         # update these tasks
-        for ii in p_and_t ^ t_not_p:
+        for ii in planner_tasks_map.keys():
             task = planner_tasks_map[ii]
             issue = tracker_issues_map[ii]
 
-            task.attrib["name"] = "{it} [{ii}]".format(it=issue["title"], ii=ii)
+            task.attrib["name"] = "[{ii}] {iss} {it}".format(
+                it=issue["title"], ii=ii, iss=issue_status_symbols(issue))
 
             # set dates and completion
             if not task.attrib["start"]:
@@ -215,14 +227,21 @@ if __name__ == "__main__":
                 logger.info("moved issue {} from {} to {}".format(
                     ii, current_te.get("name"), new_te.get("name")))
 
-            # assign/unassign task
+            # TODO: assign/unassign task
             
+
+        # sort tasks
+        parents_of_issue_tasks = set(te.getparent() for te in planner_tasks_map.values())
+        it_to_ii_map = {it:ii for ii,it in planner_tasks_map.iteritems()}
+        for itp_te in parents_of_issue_tasks:
+            itp_te[:] = sort_tasks(itp_te[:], it_to_ii_map, tracker_issues_map)
+
 
     pd.reset_project_start()
 
     out_fn = opts.output_filename or opts.planner_filename
     if os.path.exists(out_fn):
-        os.rename(out_fn, out_fn + ".bak")
+        os.rename(out_fn, out_fn + "-" + str(int(time.time())))
     with io.open(out_fn,"w") as fh:
         fh.write(unicode(pd))
     logger.info("wrote {out_fn}".format(out_fn=out_fn))

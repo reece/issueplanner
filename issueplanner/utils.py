@@ -10,6 +10,25 @@ import re
 import arrow
 
 
+completed_statuses = ['resolved', 'invalid', 'wontfix', 'duplicate']
+checkbox = "☑"                  # \u2963"             # 
+priority_status_map = {
+    "trivial": "\u278E",        # ➎
+    "minor": "\u278D",          # ➍
+    "major": "\u278C",          # ➌
+    "critical": "\u278B",       # ➋
+    "blocker": "\u278A",        # ➊
+    }
+
+priority_level_map = {
+    "trivial": 5,
+    "minor": 4,
+    "major": 3,
+    "critical": 2, 
+    "blocker": 1,
+    }
+
+
 def bb_to_planner_ts(ts):
     """convert bitbucket timestamps to planner timestamps
 
@@ -83,3 +102,9 @@ def issue_elapsed_work_seconds(issue):
     elapsed_work_s = ceil(elapsed_work_s / hour_s) * hour_s
 
     return elapsed_work_s
+
+
+def issue_status_symbols(issue):
+    return "{pri:1.1s}{comp:1.1s}".format(
+        pri = priority_status_map[issue["priority"]],
+        comp = checkbox if issue["status"] in completed_statuses else "")
