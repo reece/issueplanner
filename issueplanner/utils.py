@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
 
-from __future__ import absolute_import, division, print_function #, unicode_literals
+from __future__ import absolute_import, division, print_function, unicode_literals
 
-"""Utilities for issueplanner"""
+__doc__ = """Utilities for issueplanner"""
 
+from math import ceil
 import re
+
+import arrow
 
 
 def bb_to_planner_ts(ts):
@@ -63,3 +66,20 @@ def milestone_path_names(milestone):
     ms_elements = milestone.split(".")
     names = [".".join(ms_elements[0:i+1]) for i in range(1,len(ms_elements))]
     return names
+    
+
+def issue_elapsed_work_seconds(issue):
+    """return *work* seconds elapsed from issue creation to last updated,
+    rounded up to nearest hour
+
+    """
+    hour_s = 3600
+    elapsed_to_work_factor = (8 * 5) / (24 * 7)  #  work 40h/168h per week
+    seconds_per_workday = 8 * hour_s
+
+    elapsed = arrow.get(issue["utc_last_updated"]) - arrow.get(issue["utc_created_on"])
+    elapsed_s = elapsed.seconds
+    elapsed_work_s = elapsed_s if elapsed_s <= seconds_per_workday else elapsed_s * elapsed_to_work_factor
+    elapsed_work_s = ceil(elapsed_work_s / hour_s) * hour_s
+
+    return elapsed_work_s

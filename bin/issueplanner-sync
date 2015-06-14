@@ -48,9 +48,9 @@ import lxml.etree as le
 
 from issueplanner.bitbucketclient import BitbucketClient
 from issueplanner.issueplannerdoc import IssuePlannerDoc
-from issueplanner.utils import bb_to_planner_ts
+from issueplanner.utils import bb_to_planner_ts, issue_elapsed_work_seconds
 
-completed_statuses = ['resolved', 'closed', 'wontfix']
+completed_statuses = ['resolved', 'closed', 'wontfix', 'duplicate']
 
 def get_options(argv):
     cfg = get_config()
@@ -64,11 +64,6 @@ def get_options(argv):
         help="path to planner xml file"
         )
     ap.add_argument(
-        "--add-milestones", "-M",
-        default=False,
-        action="store_true"
-        )
-    ap.add_argument(
         "--bitbucket-username",
         default=cfg.get("bitbucket","username"),
         )
@@ -79,6 +74,11 @@ def get_options(argv):
     ap.add_argument(
         "--cache-dir", "-C",
         default=cfg.get("issueplanner", "cache-dir"),
+        )
+    ap.add_argument(
+        "--update-cache", "-U",
+        action="store_true",
+        default=False
         )
     ap.add_argument(
         "--output-filename", "-o",
@@ -105,7 +105,7 @@ def get_config():
 def _get_issues(opts,tracker):
     fqtn = tracker["owner"] + "/" + tracker["slug"]
     pickle_path = os.path.join(opts.cache_dir,fqtn.replace("/","*")+".gz")
-    if os.path.exists(pickle_path):
+    if not opts.update_cache and os.path.exists(pickle_path):
         with gzip.open(pickle_path,"r") as fh:
             issues = pickle.load(fh)
         logger.info("read {n} {fqtn} issues from {fn}".format(
@@ -122,7 +122,7 @@ def _get_issues(opts,tracker):
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.WARN)
     logger = logging.getLogger(__name__)
 
     opts = get_options(sys.argv)
@@ -200,18 +200,20 @@ if __name__ == "__main__":
                 task.attrib["work-start"] = task.attrib["start"]
             if not task.attrib["end"]:
                 task.attrib["end"] = bb_to_planner_ts(issue["utc_last_updated"])
-
+            
+            task.attrib["work"] = unicode(issue_elapsed_work_seconds(issue))
             task.attrib["percent-complete"] = "100" if issue["status"] in completed_statuses else "0"
 
             # move task to correct milestone if neccessary
             ms = issue['metadata']['milestone']
-            current_ms_te = task.getparent()
+            current_te = task.getparent()
             new_ms_te = pd.get_milestone_task(prj_te, ms)
-            if current_ms_te != new_ms_te:
-                current_ms_te.remove(task)
-                new_ms_te.append(task)
+            new_te = pd.get_task_path(new_ms_te, [issue['metadata']['kind']])
+            if current_te != new_te:
+                current_te.remove(task)
+                new_te.append(task)
                 logger.info("moved issue {} from {} to {}".format(
-                    ii, current_ms_te.get("name"), new_ms_te.get("name")))
+                    ii, current_te.get("name"), new_te.get("name")))
 
             # assign/unassign task
             
