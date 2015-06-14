@@ -50,6 +50,8 @@ from issueplanner.bitbucketclient import BitbucketClient
 from issueplanner.issueplannerdoc import IssuePlannerDoc
 from issueplanner.utils import bb_to_planner_ts
 
+completed_statuses = ['resolved', 'closed', 'wontfix']
+
 def get_options(argv):
     cfg = get_config()
 
@@ -178,22 +180,31 @@ if __name__ == "__main__":
         # attributes will be updated in the block below
         for ii in t_not_p:
             issue = tracker_issues_map[ii]
-            ms = issue['metadata']['milestone']
-            parent_te = pd.get_milestone_task(prj_te, ms)
-            planner_tasks_map[ii] = i_te = pd.create_task(ii)
-            parent_te.append(i_te)
-            logger.info("added issue {} to {}".format(ii, parent_te.get("name")))
+            i_te = pd.create_task(ii)
+            prj_te.append(i_te)
+            planner_tasks_map[ii] = i_te
+            logger.info("added issue {}".format(ii))
 
         # update these tasks
         for ii in p_and_t ^ t_not_p:
             task = planner_tasks_map[ii]
             issue = tracker_issues_map[ii]
-            ms = issue['metadata']['milestone']
 
             task.attrib["name"] = "{it} [{ii}]".format(it=issue["title"], ii=ii)
-            task.attrib["start"] = bb_to_planner_ts(issue["created_on"])
-            task.attrib["percent-complete"] = "100" if issue["status"] in ["closed"] else "0"
 
+            # set dates and completion
+            if not task.attrib["start"]:
+                task.attrib["start"] = bb_to_planner_ts(issue["utc_created_on"])
+                pd.set_task_constraint(task, "start-no-earlier-than", task.attrib["start"])
+            if not task.attrib["work-start"]:
+                task.attrib["work-start"] = task.attrib["start"]
+            if not task.attrib["end"]:
+                task.attrib["end"] = bb_to_planner_ts(issue["utc_last_updated"])
+
+            task.attrib["percent-complete"] = "100" if issue["status"] in completed_statuses else "0"
+
+            # move task to correct milestone if neccessary
+            ms = issue['metadata']['milestone']
             current_ms_te = task.getparent()
             new_ms_te = pd.get_milestone_task(prj_te, ms)
             if current_ms_te != new_ms_te:
@@ -202,10 +213,15 @@ if __name__ == "__main__":
                 logger.info("moved issue {} from {} to {}".format(
                     ii, current_ms_te.get("name"), new_ms_te.get("name")))
 
+            # assign/unassign task
+            
+
+    pd.reset_project_start()
+
     out_fn = opts.output_filename or opts.planner_filename
     if os.path.exists(out_fn):
         os.rename(out_fn, out_fn + ".bak")
     with io.open(out_fn,"w") as fh:
         fh.write(unicode(pd))
     logger.info("wrote {out_fn}".format(out_fn=out_fn))
-                 
+

@@ -135,7 +135,7 @@ class IssuePlannerDoc(PlannerDoc):
             "id": str(_get_next_task_id()),
             "name": name,
             "note": "",
-            "work": "",
+            "work": "28800",    # 8h
             "start": "",
             "end": "",
             "work-start": "",
@@ -145,4 +145,23 @@ class IssuePlannerDoc(PlannerDoc):
             "scheduling": "fixed-work",
             }
         _attrs.update(attrs)
-        return self._xml_root.makeelement("task", _attrs)
+        te = self._xml_root.makeelement("task", _attrs)
+        return te
+
+    
+    def set_task_constraint(self, te, ctype, ts):
+        ce = te.find("constraint")
+        if ce is None:
+            ce = self._xml_root.makeelement("constraint")
+            te.append(ce)
+        ce.set("type", "start-no-earlier-than")
+        ce.set("time", ts)
+
+    def reset_project_start(self):
+        """
+        The project start date 
+        """
+        earliest_ts = sorted(ts for ts in self._xml_root.xpath("///task/@start") if ts != "")[0]
+        assert self._xml_root.tag == "project"
+        self._xml_root.set("project-start", earliest_ts)
+        return earliest_ts
