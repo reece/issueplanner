@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# pep8: disable=E241
 
 from __future__ import absolute_import, division, print_function, unicode_literals
 
@@ -10,23 +11,28 @@ import re
 import arrow
 
 
-completed_statuses = ['resolved', 'invalid', 'wontfix', 'duplicate']
-checkbox = "☑"                  # \u2963"             # 
-priority_status_map = {
-    "trivial": "\u278E",        # ➎
-    "minor": "\u278D",          # ➍
-    "major": "\u278C",          # ➌
-    "critical": "\u278B",       # ➋
-    "blocker": "\u278A",        # ➊
+completed_statuses = ['resolved', 'closed', 'invalid', 'wontfix', 'duplicate']
+
+status_map = {
+    "new":        {"level": 1, "percent-complete":   "0", "symbol": ""},
+    "open":       {"level": 2, "percent-complete":   "0", "symbol": ""},
+    "on hold":    {"level": 3, "percent-complete": "100", "symbol": "\u229D"}, # ⊝
+    "resolved":   {"level": 5, "percent-complete":  "75", "symbol": "\u26F6"}, # ⛶
+    "closed":     {"level": 6, "percent-complete": "100", "symbol": "\u263A"}, # ☺
+    "invalid":    {"level": 9, "percent-complete": "100", "symbol": "\u2718"}, # ✘
+    "wontfix":    {"level": 9, "percent-complete": "100", "symbol": "\u2718"}, # ✘
+    "duplicate":  {"level": 9, "percent-complete": "100", "symbol": "\u2718"}, # ✘
     }
 
-priority_level_map = {
-    "trivial": 5,
-    "minor": 4,
-    "major": 3,
-    "critical": 2, 
-    "blocker": 1,
+priority_map = {
+    "trivial":  {"level": 5, "symbol": "\u278E"},  # ➎ # no-qa
+    "minor":    {"level": 4, "symbol": "\u278D"},  # ➍
+    "major":    {"level": 3, "symbol": "\u278C"},  # ➌
+    "critical": {"level": 2, "symbol": "\u278B"},  # ➋
+    "blocker":  {"level": 1, "symbol": "\u278A"},  # ➊
     }
+priority_status_map = {n:d["symbol"] for n,d in priority_map.iteritems()}
+priority_level_map = {n:d["level"] for n,d in priority_map.iteritems()}
 
 
 def bb_to_planner_ts(ts):
@@ -105,6 +111,11 @@ def issue_elapsed_work_seconds(issue):
 
 
 def issue_status_symbols(issue):
-    return "{pri:1.1s}{comp:1.1s}".format(
-        pri = priority_status_map[issue["priority"]],
-        comp = checkbox if issue["status"] in completed_statuses else "")
+    return "{pri:1.1s}{st:1.1s}".format(
+        pri = priority_map[issue["priority"]]["symbol"],
+        st = status_map[issue["status"]]["symbol"])
+
+def issue_sort_key(i):
+    return (status_map[i["status"]]["level"],
+            priority_map[i["priority"]]["level"],
+            int(i["local_id"]))

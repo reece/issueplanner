@@ -49,7 +49,7 @@ import lxml.etree as le
 
 from issueplanner.bitbucketclient import BitbucketClient
 from issueplanner.issueplannerdoc import IssuePlannerDoc
-from issueplanner.utils import bb_to_planner_ts, issue_elapsed_work_seconds, completed_statuses, issue_status_symbols, priority_level_map
+from issueplanner.utils import bb_to_planner_ts, issue_elapsed_work_seconds, issue_sort_key, issue_status_symbols, status_map
 
 
 def get_options(argv):
@@ -122,14 +122,18 @@ def _get_issues(opts,tracker):
 
 
 
-def sort_tasks(nodes, it_to_ii_map, tracker_issues_map):
+def sort_tasks(nodes, it_to_ii_map, ii_issue_map):
     """sort nodes according to issue data"""
     def _task_sort_key(it):
         """return sort key for given issue task"""
-        i = tracker_issues_map[it_to_ii_map[it]]
-        return (i["status"] in completed_statuses,
-                priority_level_map[i["priority"]],
-                int(i["local_id"]))
+        try:
+            ii = it_to_ii_map[it]
+        except KeyError:
+            # task is a sibling of a tracked issue, but is not in
+            # tracker
+            return None
+        iss = ii_issue_map[ii]
+        return issue_sort_key(iss)
     nodes.sort(key=_task_sort_key)
     return nodes
 
@@ -160,24 +164,24 @@ if __name__ == "__main__":
 
         # map issue ids => task node elements
         task_issue_re = re.compile(r"\[(?P<issue_id>{prefix}-\d+)\]".format(prefix=prefix))
-        planner_tasks_map = {
+        ii_te_map = {
             m.group("issue_id"): t
             for t,m in ((t, task_issue_re.search(t.get("name"))) for t in all_tasks)
             if m is not None
             }
-        planner_tasks_ii = set(planner_tasks_map.keys())
+        ii_te_keys = set(ii_te_map.keys())
 
         # map issue ids => issue data
         issues = _get_issues(opts,pt_map[prefix])
-        tracker_issues_map = {
+        ii_issue_map = {
             "{}-{}".format(prefix,i["local_id"]): i
             for i in issues
             }
-        tracker_issues_ii = set(tracker_issues_map.keys())
+        ii_issue_keys = set(ii_issue_map.keys())
 
-        t_not_p = tracker_issues_ii - planner_tasks_ii  # in tracker, not planner
-        p_and_t = planner_tasks_ii & tracker_issues_ii  # in both
-        p_not_t = planner_tasks_ii - tracker_issues_ii  # in planner, not tracker
+        t_not_p = ii_issue_keys - ii_te_keys  # in tracker, not planner
+        p_and_t = ii_te_keys & ii_issue_keys  # in both
+        p_not_t = ii_te_keys - ii_issue_keys  # in planner, not tracker
 
         logger.info("{}: {} unique in tracker, {} unique in planner xml, {} common".format(
             prefix, len(t_not_p), len(p_not_t), len(p_and_t)))
@@ -190,16 +194,17 @@ if __name__ == "__main__":
         # create placeholder tasks for issues that don't exist
         # attributes will be updated in the block below
         for ii in t_not_p:
-            issue = tracker_issues_map[ii]
+            issue = ii_issue_map[ii]
             i_te = pd.create_task(ii)
             prj_te.append(i_te)
-            planner_tasks_map[ii] = i_te
+            ii_te_map[ii] = i_te
             logger.info("added issue {}".format(ii))
 
-        # update these tasks
-        for ii in planner_tasks_map.keys():
-            task = planner_tasks_map[ii]
-            issue = tracker_issues_map[ii]
+        # update these tasks (t_not_p added above)
+        task_issue_ii = p_and_t ^ t_not_p
+        for ii in task_issue_ii:
+            task = ii_te_map[ii]
+            issue = ii_issue_map[ii]
 
             task.attrib["name"] = "[{ii}] {iss} {it}".format(
                 it=issue["title"], ii=ii, iss=issue_status_symbols(issue))
@@ -214,7 +219,7 @@ if __name__ == "__main__":
                 task.attrib["end"] = bb_to_planner_ts(issue["utc_last_updated"])
             
             task.attrib["work"] = unicode(issue_elapsed_work_seconds(issue))
-            task.attrib["percent-complete"] = "100" if issue["status"] in completed_statuses else "0"
+            task.attrib["percent-complete"] = status_map[issue["status"]]["percent-complete"]
 
             # move task to correct milestone if neccessary
             ms = issue['metadata']['milestone']
@@ -230,11 +235,13 @@ if __name__ == "__main__":
             # TODO: assign/unassign task
             
 
-        # sort tasks
-        parents_of_issue_tasks = set(te.getparent() for te in planner_tasks_map.values())
-        it_to_ii_map = {it:ii for ii,it in planner_tasks_map.iteritems()}
+        # sort planner tasks by tracker issue info via issue ids (ii)
+        # this requires a map from te (task element) to ii
+        # and a second map from ii to issue info
+        te_ii_map = {ii_te_map[ii]:ii for ii in task_issue_ii}
+        parents_of_issue_tasks = set(te.getparent() for te in ii_te_map.values())
         for itp_te in parents_of_issue_tasks:
-            itp_te[:] = sort_tasks(itp_te[:], it_to_ii_map, tracker_issues_map)
+            itp_te[:] = sort_tasks(itp_te[:], te_ii_map, ii_issue_map)
 
 
     pd.reset_project_start()
