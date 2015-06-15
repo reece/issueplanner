@@ -77,8 +77,9 @@ def get_options(argv):
         )
     ap.add_argument(
         "--update-cache", "-U",
-        action="store_true",
-        default=False
+        action="append",
+        nargs="?",
+        default=None
         )
     ap.add_argument(
         "--output-filename", "-o",
@@ -89,7 +90,6 @@ def get_options(argv):
         action="append"
         )
     opts = ap.parse_args(argv[1:])
-    opts.cache_dir = os.path.expanduser(opts.cache_dir)
     opts._cfg = cfg
     return opts
     
@@ -105,7 +105,9 @@ def get_config():
 def _get_issues(opts,tracker):
     fqtn = tracker["owner"] + "/" + tracker["slug"]
     pickle_path = os.path.join(opts.cache_dir,fqtn.replace("/","*")+".gz")
-    if not opts.update_cache and os.path.exists(pickle_path):
+    update_cache = (opts.update_cache is not None
+                    and (opts.update_cache == [None] or tracker["prefix"] in opts.update_cache))
+    if not update_cache and os.path.exists(pickle_path):
         with gzip.open(pickle_path,"r") as fh:
             issues = pickle.load(fh)
         logger.debug("read {n} {fqtn} issues from {fn}".format(
@@ -118,6 +120,7 @@ def _get_issues(opts,tracker):
             pickle.dump(issues,fh)
         logger.debug("fetched {n} {fqtn} issues; pickled in {fn}".format(
             n=len(issues), fqtn=fqtn, fn=pickle_path))
+
     return issues
 
 
@@ -143,6 +146,7 @@ if __name__ == "__main__":
     logger = logging.getLogger(__name__)
 
     opts = get_options(sys.argv)
+    opts.cache_dir = os.path.expanduser(opts.cache_dir)
 
     if not os.path.exists(opts.cache_dir):
         os.makedirs(opts.cache_dir)
